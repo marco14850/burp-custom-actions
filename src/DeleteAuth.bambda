@@ -1,0 +1,13 @@
+name: Delete Auth
+function: CUSTOM_ACTION
+location: REPEATER
+source: |+
+    logging.logToOutput("=== CA: Delete Auth ===");
+
+    var req = requestResponse.request();
+    var newReq = req.withRemovedHeader("Authorization").withRemovedHeader("Cookie");
+    var response = api().http().sendRequest(newReq).response();
+    var bodyText = response.bodyToString();
+    var preview = bodyText.length() > 50 ? bodyText.substring(0, 50) : bodyText;
+    logging().logToOutput("HTTPStatus: " + response.statusCode());
+    logging().logToOutput("Body: " + preview + " ....");

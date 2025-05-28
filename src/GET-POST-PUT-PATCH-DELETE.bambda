@@ -1,0 +1,17 @@
+name: GET POST PUT PATCH DELETE
+function: CUSTOM_ACTION
+location: REPEATER
+source: |+
+	logging.logToOutput("=== CA: GET POST PUT PATCH DELETE  ===");
+
+	String[] methods = new String[] { "GET","POST","PUT", "PATCH" ,"DELETE" };
+	for (String method : methods) {
+		var req = requestResponse.request().withMethod(method).withBody("");
+		var response = api.http().sendRequest(req).response();
+		var status = response.statusCode();
+		var body = response.bodyToString();
+		var preview = body.length() > 50 ? body.substring(0, 50) : body;
+		logging.logToOutput("["+method+"]");
+		logging.logToOutput("["+method+"] Status: " + status);
+		logging.logToOutput("["+method+"] Body: " + preview);
+	}

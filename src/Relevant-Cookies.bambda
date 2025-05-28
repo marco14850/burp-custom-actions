@@ -1,0 +1,51 @@
+name: Relevant Cookies
+function: CUSTOM_ACTION
+location: REPEATER
+source: |+
+    logging.logToOutput("=== CA: Relevant Cookies ===");
+
+    var originalRequest = requestResponse.request();
+    var originalResponse = api.http().sendRequest(originalRequest).response();
+    int originalLength = originalResponse.bodyToString().length();
+
+    var allHeaders = originalRequest.headers();
+    var originalCookies = new java.util.ArrayList<String>();
+
+
+    for (HttpHeader listHeader : allHeaders) {
+        if (listHeader.name().equalsIgnoreCase("Cookie")) {
+            for (String cookie : listHeader.value().split(";")) {
+                originalCookies.add(cookie.trim());
+            }
+        } 
+    }
+
+    var necessaryCookies = new java.util.ArrayList<String>();
+    for (int i = 0; i < originalCookies.size(); i++) {
+        var testCookies = new java.util.ArrayList<String>(originalCookies);
+        testCookies.remove(i);
+
+        var headers = HttpHeader.httpHeader("Cookie","");
+        if (!testCookies.isEmpty()) {
+            headers = HttpHeader.httpHeader("Cookie", String.join("; ", testCookies));
+        }
+        
+        var newRequest = originalRequest.withUpdatedHeader(headers).withBody(originalRequest.bodyToString());
+        var response = api.http().sendRequest(newRequest).response();
+        int newLength = response.bodyToString().length();
+        if (newLength == originalLength) {
+            logging.logToOutput("[-] Optional cookie: " + originalCookies.get(i));
+        } else {
+            necessaryCookies.add(originalCookies.get(i));
+            logging.logToOutput("[+] Main cookie: " + originalCookies.get(i));
+        }
+    }
+
+    logging.logToOutput("=== Main cookies ===");
+
+    for (String c : necessaryCookies) {
+        logging.logToOutput(c);
+    }
+
+    logging.logToOutput("COPY/PASTE Header Main Cookies");
+    logging.logToOutput("Cookie: "+String.join("; ", necessaryCookies));

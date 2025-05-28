@@ -1,0 +1,20 @@
+name: OPTIONS TRACE HEAD CONNECT
+function: CUSTOM_ACTION
+location: REPEATER
+source: |+
+	logging.logToOutput("=== CA: OPTIONS TRACE HEAD CONNECT  ===");
+
+	String[] methods = new String[] { "OPTIONS", "TRACE", "HEAD","CONNECT" };
+	for (String method : methods) {
+		var req = requestResponse.request().withMethod(method).withBody("");
+		var response = api.http().sendRequest(req).response();
+		var status = response.statusCode();
+		var body = response.bodyToString();
+		var preview = body.length() > 50 ? body.substring(0, 50) : body;
+		var allow = response.headerValue("Allow");
+		if (allow == null) allow = "No 'Allow' header";
+		logging.logToOutput("["+method+"]");
+		logging.logToOutput("["+method+"] Status: " + status);
+		logging.logToOutput("["+method+"] Allow: " + allow);
+		logging.logToOutput("["+method+"] Body: " + preview);
+	}

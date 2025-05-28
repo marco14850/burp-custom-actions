@@ -1,0 +1,38 @@
+name: Search Common Files
+function: CUSTOM_ACTION
+location: REPEATER
+source: |+
+    logging.logToOutput("=== CA: Search Common Files  ===");
+
+    String[] urls = new String[] { "robots.txt", "sitemap.xml", "humans.txt", "security.txt", "ads.txt", "crossdomain.xml", "browserconfig.xml", "manifest.json", "favicon.ico", "config.php", "phpinfo.php", "swagger","swagger-ui/index.html","swagger.json","swagger.yaml","docs","redoc","openapi.json", "server-status", "server-info", ".env", "package.json", "composer.json", "wp-login.php",".well-known/openid-configuration",".well-known/security.txt",".well-known/jwks.json","jwks.json","health","backup.zip","bck.zip",".git/config"};
+    var baseRequest = requestResponse.request();
+    var foundUrls = new java.util.ArrayList<String>();
+
+    for (String path : urls) {
+        try {
+            var newRequest = baseRequest
+                .withMethod("GET")
+                .withPath("/"+path)
+                .withBody("");
+
+            var response = api.http().sendRequest(newRequest).response();
+
+            var status = response.statusCode();
+            var body = response.bodyToString();
+            var preview = body.length() > 50 ? body.substring(0, 50) : body;
+
+            if (status == 200) {
+                foundUrls.add(newRequest.url());
+            }
+            
+            logging.logToOutput("URL: " + path);
+            logging.logToOutput("Status: " + status);
+            logging.logToOutput("Body: " + preview);
+        } catch (Exception e) {
+            logging.logToOutput("Error processing " + path + ": " + e.getMessage());
+        }
+    }
+    logging.logToOutput("---URLs found---");
+    for (String url : foundUrls) {
+        logging.logToOutput(url);
+    }

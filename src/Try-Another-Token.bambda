@@ -1,0 +1,71 @@
+name: Try Another Token
+function: CUSTOM_ACTION
+location: REPEATER
+source: |+
+    logging.logToOutput("=== CA: Try Another Token ===");
+
+    // Modify your Headers 
+    var customHeaders = java.util.List.of(
+        HttpHeader.httpHeader("Authorization", "Bearer eyJhbGciOi..."),
+        HttpHeader.httpHeader("X-Api-Key", "1234567890abcdef")
+    );
+
+    // Modify your Cookies
+    var customCookies = java.util.List.of(
+        "SESSIONID=OTHERSESSIONVALUE",
+        "session_legacy=FAKETOKENVALUE"
+    );
+
+    var req = requestResponse.request();
+    var originalCookies = req.header("Cookie");
+
+    var updatedCookies = new java.util.ArrayList<>(java.util.Arrays.asList(originalCookies.value().split(";")));
+
+
+    for (HttpHeader customH : customHeaders) {
+        boolean updated = false;
+        for (HttpHeader header : req.headers()) {
+            if (customH.name().equalsIgnoreCase(header.name())) {
+                logging.logToOutput("---- Updating header: " + header.name());
+                req = req.withUpdatedHeader(customH);
+                updated = true;
+                break;
+            }
+        }
+        if (!updated) {
+            logging.logToOutput("---- Adding header: " + customH.name());
+            req = req.withAddedHeader(customH);
+        }
+    }
+
+    for (String modCookie : customCookies) {
+        boolean updated = false;
+        var modSplit = modCookie.split("=", 2);
+        var modName = modSplit[0];
+        var modValue = modSplit.length > 1 ? modSplit[1] : "";
+
+        for (int i = 0; i < updatedCookies.size(); i++) {
+            var origSplit = updatedCookies.get(i).split("=", 2);
+            var origName = origSplit[0].trim();
+
+            if (origName.equalsIgnoreCase(modName)) {
+                logging.logToOutput("---- Updating cookie: " + modName);
+                updatedCookies.set(i, modName + "=" + modValue);
+                updated = true;
+            }
+        }
+        if (!updated) {
+            logging.logToOutput("---- Adding Cookie: " + modCookie);
+            updatedCookies.add(modCookie);
+        }
+    }
+
+    var newCookieHeader = updatedCookies.stream().collect(java.util.stream.Collectors.joining("; "));
+    req = req.withUpdatedHeader(HttpHeader.httpHeader("Cookie", newCookieHeader));
+    logging.logToOutput("=== Sending Request ===");
+    var response = api().http().sendRequest(req).response();
+    var bodyText = response.bodyToString();
+    var preview = bodyText.length() > 50 ? bodyText.substring(0, 50) : bodyText;
+
+    logging().logToOutput("HTTP Status: " + response.statusCode());
+    logging().logToOutput("Body: " + preview + " ....");
