@@ -7,6 +7,7 @@ Este repositorio contiene un recopilado de las Custom Actions de BurpSuite que h
 - **Common-Files.bambda**: Verifica la existencia de archivos comunes como `robots.txt` dentro del dominio de la petición actual.
 - **Relevant-Cookies.bambda**: Evalúa la relevancia de cada cookie eliminándolas una a una, para determinar cuáles son necesarias para que la petición funcione correctamente.
 - **Try-Another-Token.bambda**: Reenvía la petición actual con el token de sesión de otro usuario, modificando únicamente la cabecera o cookie especificada. Útil para probar suplantación de identidad.
+- **Selected-String-Analyzer.bambda**: Analiza el texto seleccionado en la respuesta para identificar su posible tipo, como hashes (MD5, SHA1, SHA256, etc.), datos codificados en Base64, UTF-8 o posibles números de tarjeta de crédito (TDC) válidos mediante el algoritmo de Luhn.
 - **DeleteAuth.bambda**: Envía la petición sin el token ni cookies, para comprobar si la solicitud puede ejecutarse sin autenticación.
 - ⚠️ **GET-POST-PUT-PATCH-DELETE.bambda**: Ejecuta la solicitud con distintos métodos HTTP para descubrir funcionalidades expuestas.  
   ⚠️ **Advertencia**: El uso del método DELETE podría causar cambios irreversibles.

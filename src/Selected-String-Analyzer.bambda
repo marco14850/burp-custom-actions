@@ -1,0 +1,89 @@
+name: Selected String Analyzer
+function: CUSTOM_ACTION
+location: REPEATER
+source: |+
+    logging().logToOutput("== Custom Action: Selected String Analyzer ==");
+    var selectedText = selection.responseSelection().contents().toString();
+    selectedText = selectedText.strip();
+    int categories = 0;
+    logging().logToOutput(selectedText);
+
+    if( !selectedText.matches("^[0-9]+$") && !selectedText.matches("^[a-zA-Z]+$")){
+        if (selectedText.matches("^[a-fA-F0-9]{32}$")) {
+            logging().logToOutput("Detected: MD5 hash");
+            categories +=1 ;
+        } else if (selectedText.matches("^[a-fA-F0-9]{40}$")) {
+            logging().logToOutput("Detected: SHA1 hash");
+            categories +=1 ;
+        } else if (selectedText.matches("^[a-fA-F0-9]{64}$")) {
+            logging().logToOutput("Detected: SHA256 hash");
+            categories +=1 ;
+        } else if (selectedText.matches("^[a-fA-F0-9]{128}$")) {
+            logging().logToOutput("Detected: SHA512 hash");
+            categories +=1 ;
+        } else if (selectedText.matches("^[A-Za-z0-9+/=\\r\\n]+$") && selectedText.length() % 4 == 0) {
+            logging().logToOutput("Detected: Base64");
+            categories +=1 ;
+        }     
+    } 
+
+
+    if (selectedText.startsWith("$2a$") || selectedText.startsWith("$2b$") || selectedText.startsWith("$2y$")) {
+        logging().logToOutput("Detected: bcrypt hash");
+        categories +=1 ;
+    }
+    
+    if (selectedText.matches("\\d{12,19}")) {
+        logging().logToOutput("Detected: Possibly TDC");
+        var sum = 0;
+        var alternate = false;
+
+        for (var i = selectedText.length() - 1; i >= 0; i--) {
+            var n = java.lang.Integer.parseInt(selectedText.substring(i, i + 1));
+            
+            if (alternate) {
+                n *= 2;
+                if (n > 9) {
+                    n = (n % 10) + 1;
+                }
+            }
+            sum += n;
+            alternate = !alternate;
+        }
+
+        var remainder = sum % 10;
+
+        if (remainder == 0) {
+            logging().logToOutput("Detected: Valid Credit Card Number (Luhn Passed)");
+            categories +=1 ;
+        } else {
+            sum = 0;
+            alternate = true;
+
+            for (var i = selectedText.length() - 1; i >= 0; i--) {
+                var n = java.lang.Integer.parseInt(selectedText.substring(i, i + 1));
+                
+                if (alternate) {
+                    n *= 2;
+                    if (n > 9) {
+                        n = (n % 10) + 1;
+                    }
+                }
+                sum += n;
+                alternate = !alternate;
+            }
+            remainder = sum % 10;
+            var neededDigit = (10 - remainder);
+            logging().logToOutput("Detected: Possibly Incomplete TDC (Luhn Failed). Add digit: " + neededDigit);
+            logging().logToOutput("Complete TDC: " + selectedText + neededDigit);
+        }
+    }
+    
+    if (categories==0 && selectedText.matches("^[\\p{Print}\\s]+$")) {
+        logging().logToOutput("Detected: Possibly UTF-8 text");
+        categories +=1 ;
+    } 
+    
+    if (categories==0) {
+        logging().logToOutput("Detected: Unknown format");
+    }
