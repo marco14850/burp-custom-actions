@@ -1,0 +1,69 @@
+name: Web Cache Deception
+function: CUSTOM_ACTION
+location: REPEATER
+source: |+
+    logging.logToOutput("=== Web Cache Deception: candidate discovery ===");
+    var original = requestResponse.request();
+    if (!original.method().equals("GET")) {
+        logging.logToOutput("Use a GET request so the baseline and probes have the same method."); return;
+    }
+    // Keep the original query on every probe (it may be required for the resource).
+    String path = original.path();
+    int queryIndex = path.indexOf('?');
+    String query = queryIndex < 0 ? "" : path.substring(queryIndex);
+    String basePath = queryIndex < 0 ? path : path.substring(0, queryIndex);
+    String marker = "wcd-" + java.util.UUID.randomUUID().toString();
+    String[] delimiters = {"/", ";", "%2F", "%3B", "%3F", "%23", "%00"};
+    String[] extensions = {".css", ".js", ".jpg", ".png", ".ico", ".svg"};
+    java.util.function.Predicate<HttpResponse> forbidsCache = response -> {
+        String value = response.headerValue("Cache-Control");
+        return value != null && java.util.regex.Pattern.compile("(?i)(?:^|,)\\s*(?:no-store|private|no-cache)(?:\\s|=|,|$)").matcher(value).find();
+    };
+    try {
+        var baseline = api.http().sendRequest(original).response();
+        var control = api.http().sendRequest(original).response();
+        if (baseline == null || control == null || baseline.statusCode() != 200
+            || control.statusCode() != baseline.statusCode()
+            || !baseline.bodyToString().equals(control.bodyToString()) || baseline.body().length() == 0) {
+            logging.logToOutput("Inconclusive: require a stable, nonempty 200 baseline."); return;
+        }
+        java.util.function.Predicate<HttpResponse> matches = response -> response != null
+            && response.statusCode() == baseline.statusCode()
+            && java.util.Objects.equals(response.headerValue("Content-Type"), baseline.headerValue("Content-Type"))
+            && response.bodyToString().equals(baseline.bodyToString());
+        var anonymousBaseline = api.http().sendRequest(original.withRemovedHeader("Authorization").withRemovedHeader("Cookie")).response();
+        if (anonymousBaseline == null || matches.test(anonymousBaseline)) {
+            logging.logToOutput("Inconclusive: baseline is public or anonymous control unavailable."); return;
+        }
+        int candidates = 0;
+        for (String delimiter : delimiters) {
+            for (String extension : extensions) {
+                var candidate = original.withPath(basePath + delimiter + marker + extension + query);
+                try {
+                    var authenticated = api.http().sendRequest(candidate).response();
+                    if (!matches.test(authenticated) || forbidsCache.test(authenticated)) continue;
+                    var anonymous = candidate.withRemovedHeader("Authorization").withRemovedHeader("Cookie");
+                    var retrieved = api.http().sendRequest(anonymous).response();
+                    if (!matches.test(retrieved) || forbidsCache.test(retrieved)) continue;
+                    // A positive Age or explicit HIT is supporting evidence, never proof on its own.
+                    String age = retrieved.headerValue("Age");
+                    String cache = String.valueOf(retrieved.headerValue("X-Cache")) + " "
+                        + String.valueOf(retrieved.headerValue("CF-Cache-Status"));
+                    boolean cacheEvidence = cache.toUpperCase(java.util.Locale.ROOT).matches(".*\\bHIT\\b.*");
+                    if (age != null) {
+                        try { cacheEvidence |= Long.parseLong(age.trim()) > 0; }
+                        catch (NumberFormatException ignored) { }
+                    }
+                    candidates++;
+                    logging.logToOutput("Unconfirmed candidate: " + candidate.url()
+                        + " | anonymous body matches protected baseline | cache evidence=" + cacheEvidence);
+                } catch (Exception e) {
+                    logging.logToOutput("Inconclusive probe: " + candidate.url() + " | " + e.getMessage());
+                }
+            }
+        }
+        logging.logToOutput("Candidates: " + candidates + ". Confirm cache origin and persistence manually; matching content may also indicate an authorization bypass.");
+        logging.logToOutput("Anonymous controls remove Authorization and Cookie only; remove any additional credentials and disable session handling rules before testing.");
+    } catch (Exception e) {
+        logging.logToOutput("Inconclusive: " + e.getMessage());
+    }

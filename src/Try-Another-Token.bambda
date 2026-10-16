@@ -4,7 +4,7 @@ location: REPEATER
 source: |+
     logging.logToOutput("=== CA: Try Another Token ===");
 
-    // Modify your Headers 
+    // Modify your Headers
     var customHeaders = java.util.List.of(
         HttpHeader.httpHeader("Authorization", "Bearer eyJhbGciOi..."),
         HttpHeader.httpHeader("X-Api-Key", "1234567890abcdef")
@@ -17,10 +17,14 @@ source: |+
     );
 
     var req = requestResponse.request();
-    var originalCookies = req.header("Cookie");
-
-    var updatedCookies = new java.util.ArrayList<>(java.util.Arrays.asList(originalCookies.value().split(";")));
-
+    var updatedCookies = new java.util.ArrayList<String>();
+    for (var header : req.headers()) {
+        if (header.name().equalsIgnoreCase("Cookie")) {
+            for (String cookie : header.value().split(";")) {
+                if (!cookie.trim().isEmpty()) updatedCookies.add(cookie.trim());
+            }
+        }
+    }
 
     for (HttpHeader customH : customHeaders) {
         boolean updated = false;
@@ -48,7 +52,7 @@ source: |+
             var origSplit = updatedCookies.get(i).split("=", 2);
             var origName = origSplit[0].trim();
 
-            if (origName.equalsIgnoreCase(modName)) {
+            if (origName.equals(modName)) {
                 logging.logToOutput("---- Updating cookie: " + modName);
                 updatedCookies.set(i, modName + "=" + modValue);
                 updated = true;
@@ -61,7 +65,7 @@ source: |+
     }
 
     var newCookieHeader = updatedCookies.stream().collect(java.util.stream.Collectors.joining("; "));
-    req = req.withUpdatedHeader(HttpHeader.httpHeader("Cookie", newCookieHeader));
+    req = req.withRemovedHeader("Cookie").withAddedHeader(HttpHeader.httpHeader("Cookie", newCookieHeader));
     logging.logToOutput("=== Sending Request ===");
     var response = api().http().sendRequest(req).response();
     var bodyText = response.bodyToString();

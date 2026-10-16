@@ -1,0 +1,80 @@
+name: Relevant Headers
+function: CUSTOM_ACTION
+location: REPEATER
+source: |+
+    var original = requestResponse.request();
+    // Optional regex for known volatile fields; empty means exact comparison.
+    String volatilePattern = "";
+    java.util.function.Function<String, String> normalize = text ->
+        volatilePattern.isEmpty() ? text : text.replaceAll(volatilePattern, "<volatile>");
+    try {
+        var baseline = api.http().sendRequest(original).response();
+        var control = api.http().sendRequest(original).response();
+        if (baseline == null || control == null) {
+            logging.logToOutput("Inconclusive: baseline response unavailable.");
+            return;
+        }
+        java.util.function.Predicate<HttpResponse> equivalent = response -> response != null
+            && response.statusCode() == baseline.statusCode()
+            && java.util.Objects.equals(response.headerValue("Content-Type"), baseline.headerValue("Content-Type"))
+            && java.util.Objects.equals(response.headerValue("Location"), baseline.headerValue("Location"))
+            && normalize.apply(response.bodyToString()).equals(normalize.apply(baseline.bodyToString()));
+        if (!equivalent.test(control)) {
+            logging.logToOutput("Inconclusive: baseline is unstable. Configure volatilePattern for known dynamic fields.");
+            return;
+        }
+        var current = original;
+
+        var protectedNames = java.util.Set.of("host", "content-length", "transfer-encoding", "connection", "upgrade",
+            ":method", ":scheme", ":authority", ":path", "accept-encoding", "te", "trailer", "keep-alive", "cookie");
+        var tested = new java.util.HashSet<String>();
+        for (var header : original.headers()) {
+            var name = header.name().toLowerCase(java.util.Locale.ROOT);
+            if (protectedNames.contains(name) || !tested.add(name)) continue;
+            try {
+                var candidate = current.withRemovedHeader(header.name());
+                if (equivalent.test(api.http().sendRequest(candidate).response())) {
+                    current = candidate;
+                    logging.logToOutput("Removed header: " + header.name());
+                } else logging.logToOutput("Kept header: " + header.name());
+            } catch (Exception e) {
+                logging.logToOutput("Inconclusive; kept header: " + header.name());
+            }
+        }
+
+        var cookies = new java.util.ArrayList<String>();
+        for (var header : current.headers()) {
+            if (header.name().equalsIgnoreCase("Cookie")) {
+                for (String cookie : header.value().split(";")) {
+                    if (!cookie.trim().isEmpty()) cookies.add(cookie.trim());
+                }
+            }
+        }
+        for (int i = 0; i < cookies.size();) {
+            var remaining = new java.util.ArrayList<String>(cookies);
+            var removed = remaining.remove(i);
+            try {
+                var candidate = current.withRemovedHeader("Cookie");
+                if (!remaining.isEmpty()) candidate = candidate.withAddedHeader(HttpHeader.httpHeader("Cookie", String.join("; ", remaining)));
+                if (equivalent.test(api.http().sendRequest(candidate).response())) {
+                    current = candidate;
+                    cookies = remaining;
+                    logging.logToOutput("Removed cookie: " + removed.split("=", 2)[0]);
+                    continue;
+                }
+                logging.logToOutput("Kept cookie: " + removed.split("=", 2)[0]);
+            } catch (Exception e) {
+                logging.logToOutput("Inconclusive; kept cookie: " + removed.split("=", 2)[0]);
+            }
+            i++;
+        }
+        if (!equivalent.test(api.http().sendRequest(current).response())
+            || !equivalent.test(api.http().sendRequest(original).response())) {
+            logging.logToOutput("Inconclusive: final validation failed. No reduced request exported.");
+            return;
+        }
+        api.repeater().sendToRepeater(current);
+        logging.logToOutput("Validated reduced request sent to Repeater (greedy reduction; global minimum not guaranteed).");
+    } catch (Exception e) {
+        logging.logToOutput("Inconclusive: " + e.getMessage());
+    }

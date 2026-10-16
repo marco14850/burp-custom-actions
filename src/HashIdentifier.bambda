@@ -1,0 +1,19 @@
+name: Hash Identifier
+function: CUSTOM_ACTION
+location: REPEATER
+source: |+
+    var text = selection.responseSelection().contents().toString().strip();
+    if (text.isEmpty()) { logging().logToOutput("Select text in the response first."); return; }
+    boolean found = false;
+    int[] lengths = {32, 40, 64, 128};
+    String[] names = {"MD5", "SHA-1", "SHA-256", "SHA-512"};
+    for (int i = 0; i < lengths.length; i++) {
+        if (text.matches("[a-fA-F0-9]{" + lengths[i] + "}")) {
+            logging().logToOutput("Possible " + names[i] + " digest (format only; algorithm not confirmed).");
+            found = true;
+        }
+    }
+    if (text.matches("\\$2[aby]\\$(0[4-9]|[12][0-9]|3[01])\\$[./A-Za-z0-9]{53}")) {
+        logging().logToOutput("Possible bcrypt hash (format only)."); found = true;
+    }
+    if (!found) logging().logToOutput("No supported hash format identified. Use Selected String Analyzer for encodings and Luhn.");
