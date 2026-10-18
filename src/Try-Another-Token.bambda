@@ -27,19 +27,14 @@ source: |+
     }
 
     for (HttpHeader customH : customHeaders) {
-        boolean updated = false;
+        var matching = new java.util.ArrayList<HttpHeader>();
         for (HttpHeader header : req.headers()) {
             if (customH.name().equalsIgnoreCase(header.name())) {
-                logging.logToOutput("---- Updating header: " + header.name());
-                req = req.withUpdatedHeader(customH);
-                updated = true;
-                break;
+                matching.add(header);
             }
         }
-        if (!updated) {
-            logging.logToOutput("---- Adding header: " + customH.name());
-            req = req.withAddedHeader(customH);
-        }
+        logging.logToOutput("---- Setting header: " + customH.name());
+        req = req.withRemovedHeaders(matching).withAddedHeader(customH);
     }
 
     for (String modCookie : customCookies) {
@@ -59,15 +54,26 @@ source: |+
             }
         }
         if (!updated) {
-            logging.logToOutput("---- Adding Cookie: " + modCookie);
+            logging.logToOutput("---- Adding Cookie: " + modName);
             updatedCookies.add(modCookie);
         }
     }
 
     var newCookieHeader = updatedCookies.stream().collect(java.util.stream.Collectors.joining("; "));
-    req = req.withRemovedHeader("Cookie").withAddedHeader(HttpHeader.httpHeader("Cookie", newCookieHeader));
+    var cookieHeaders = new java.util.ArrayList<HttpHeader>();
+    for (var header : req.headers()) {
+        if (header.name().equalsIgnoreCase("Cookie")) cookieHeaders.add(header);
+    }
+    req = req.withRemovedHeaders(cookieHeaders);
+    if (!newCookieHeader.isEmpty()) req = req.withAddedHeader(HttpHeader.httpHeader("Cookie", newCookieHeader));
     logging.logToOutput("=== Sending Request ===");
-    var response = api().http().sendRequest(req).response();
+    HttpResponse response;
+    try {
+        response = api().http().sendRequest(req).response();
+    } catch (Exception e) {
+        logging().logToOutput("Inconclusive: transport error (" + e.getClass().getSimpleName() + ")."); return;
+    }
+    if (response == null) { logging().logToOutput("Inconclusive: no response received."); return; }
     var bodyText = response.bodyToString();
     var preview = bodyText.length() > 50 ? bodyText.substring(0, 50) : bodyText;
 

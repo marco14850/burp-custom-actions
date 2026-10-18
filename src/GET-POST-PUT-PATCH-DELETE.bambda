@@ -2,16 +2,18 @@ name: GET POST PUT PATCH DELETE
 function: CUSTOM_ACTION
 location: REPEATER
 source: |+
-	logging.logToOutput("=== CA: GET POST PUT PATCH DELETE  ===");
-
-	String[] methods = new String[] { "GET","POST","PUT", "PATCH" ,"DELETE" };
-	for (String method : methods) {
-		var req = requestResponse.request().withMethod(method).withBody("");
-		var response = api.http().sendRequest(req).response();
-		var status = response.statusCode();
-		var body = response.bodyToString();
-		var preview = body.length() > 50 ? body.substring(0, 50) : body;
-		logging.logToOutput("["+method+"]");
-		logging.logToOutput("["+method+"] Status: " + status);
-		logging.logToOutput("["+method+"] Body: " + preview);
-	}
+    logging.logToOutput("=== CA: GET POST PUT PATCH DELETE ===");
+    // Preserve the original body to vary only the method. Requests may change server state.
+    var httpMethods = new String[] {"GET", "POST", "PUT", "PATCH", "DELETE"};
+    for (String method : httpMethods) {
+        try {
+            var req = requestResponse.request().withMethod(method);
+            var response = api.http().sendRequest(req).response();
+            if (response == null) { logging.logToOutput("[" + method + "] Inconclusive: no response."); continue; }
+            var body = response.bodyToString();
+            logging.logToOutput("[" + method + "] Status: " + response.statusCode());
+            logging.logToOutput("[" + method + "] Body: " + (body.length() > 50 ? body.substring(0, 50) : body));
+        } catch (Exception e) {
+            logging.logToOutput("[" + method + "] Inconclusive: transport error (" + e.getClass().getSimpleName() + ").");
+        }
+    }

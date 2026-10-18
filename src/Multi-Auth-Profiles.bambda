@@ -1,0 +1,103 @@
+name: Multi Auth Profiles
+function: CUSTOM_ACTION
+location: REPEATER
+source: |+
+    // Replace the example credentials and set configured=true before running.
+    boolean configured = false;
+    class AuthProfile {
+        final String name;
+        final java.util.Map<String, String> headers;
+        final java.util.Map<String, String> cookies;
+        AuthProfile(String name, java.util.Map<String, String> headers, java.util.Map<String, String> cookies) {
+            this.name = name; this.headers = headers; this.cookies = cookies;
+        }
+    }
+    // Add/remove profiles freely. Empty maps mean no headers/cookies for that profile.
+    var profiles = java.util.List.of(
+        new AuthProfile("Bearer user", java.util.Map.of(
+            "Authorization", "Bearer REPLACE_USER_TOKEN"
+        ), java.util.Map.of()),
+        new AuthProfile("Session user", java.util.Map.of(), java.util.Map.of(
+            "SESSIONID", "REPLACE_SESSION_VALUE"
+        )),
+        new AuthProfile("API key and session", java.util.Map.of(
+            "X-Api-Key", "REPLACE_API_KEY",
+            "X-CSRF-Token", "REPLACE_CSRF_TOKEN"
+        ), java.util.Map.of(
+            "SESSIONID", "REPLACE_OTHER_SESSION_VALUE",
+            "csrf", "REPLACE_CSRF_COOKIE"
+        ))
+    );
+    // Also remove original credential headers not used by any profile. Names are case-insensitive.
+    var credentialHeaders = new java.util.HashSet<String>(java.util.Set.of(
+        "authorization", "proxy-authorization", "cookie", "x-api-key", "x-csrf-token", "x-xsrf-token"
+    ));
+    if (!configured) {
+        logging.logToOutput("Configure profiles with real credentials, then set configured=true. No requests sent."); return;
+    }
+    if (profiles.isEmpty()) { logging.logToOutput("Add at least one authentication profile."); return; }
+    var original = requestResponse.request();
+    if (original.httpService() == null) { logging.logToOutput("HTTP service unavailable. No requests sent."); return; }
+    var protocolHeaders = java.util.Set.of("host", "content-length", "transfer-encoding", "connection", "upgrade", "te", "trailer");
+    String tokenPattern = "[!#$%&'*+.^_`|~0-9A-Za-z-]+";
+    var profileNames = new java.util.HashSet<String>();
+    // Validate the entire configuration before sending any requests.
+    for (var profile : profiles) {
+        if (profile.name.isBlank() || profile.name.contains("\r") || profile.name.contains("\n") || !profileNames.add(profile.name)) {
+            logging.logToOutput("Invalid configuration: profile names must be nonempty, unique and single-line."); return;
+        }
+        var headerNames = new java.util.HashSet<String>();
+        for (var header : profile.headers.entrySet()) {
+            String name = header.getKey().toLowerCase(java.util.Locale.ROOT);
+            if (!header.getKey().matches(tokenPattern) || name.equals("cookie") || protocolHeaders.contains(name)
+                || !headerNames.add(name) || header.getValue().contains("\r") || header.getValue().contains("\n")) {
+                logging.logToOutput("Invalid configuration: use unique credential headers only; configure Cookie through the cookies map."); return;
+            }
+            credentialHeaders.add(name);
+        }
+        for (var cookie : profile.cookies.entrySet()) {
+            if (!cookie.getKey().matches(tokenPattern) || cookie.getValue().contains(";")
+                || cookie.getValue().contains("\r") || cookie.getValue().contains("\n")) {
+                logging.logToOutput("Invalid configuration: invalid cookie name or value. Values must not include semicolons or newlines."); return;
+            }
+        }
+    }
+    // Remove every matching header instance, including duplicates and mixed-case names.
+    var removed = new java.util.ArrayList<HttpHeader>();
+    for (var header : original.headers()) {
+        if (credentialHeaders.contains(header.name().toLowerCase(java.util.Locale.ROOT))) removed.add(header);
+    }
+    var clean = original.withRemovedHeaders(removed);
+    logging.logToOutput("=== Multi Auth Profiles: " + profiles.size() + " requests ===");
+    logging.logToOutput("Original method, path and body are preserved.");
+    int completed = 0;
+    for (var profile : profiles) {
+        // Start from the same clean request for every profile; no credentials carry over.
+        var req = clean;
+        for (var header : profile.headers.entrySet()) {
+            req = req.withAddedHeader(HttpHeader.httpHeader(header.getKey(), header.getValue()));
+        }
+        if (!profile.cookies.isEmpty()) {
+            var cookies = new java.util.ArrayList<String>();
+            for (var cookie : profile.cookies.entrySet()) cookies.add(cookie.getKey() + "=" + cookie.getValue());
+            req = req.withAddedHeader(HttpHeader.httpHeader("Cookie", String.join("; ", cookies)));
+        }
+        try {
+            var response = api.http().sendRequest(req).response();
+            if (response == null) {
+                logging.logToOutput("[" + profile.name + "] Inconclusive: no response.");
+            } else {
+                completed++;
+                logging.logToOutput("[" + profile.name + "] status=" + response.statusCode()
+                    + " | bytes=" + response.body().length());
+                var body = response.bodyToString().replaceAll("[\\r\\n\\t]+", " ");
+                var preview = body.length() > 50 ? body.substring(0, 50) + "..." : body;
+                logging.logToOutput("[" + profile.name + "] Body: " + (preview.isEmpty() ? "(empty)" : preview));
+            }
+        } catch (Exception e) {
+            // Exception messages can contain credentials; report only the exception type.
+            logging.logToOutput("[" + profile.name + "] Inconclusive: transport error (" + e.getClass().getSimpleName() + ").");
+        }
+    }
+    logging.logToOutput("Responses received: " + completed + "/" + profiles.size()
+        + ".");

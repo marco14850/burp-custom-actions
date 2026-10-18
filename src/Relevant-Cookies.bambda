@@ -2,6 +2,7 @@ name: Relevant Cookies
 function: CUSTOM_ACTION
 location: REPEATER
 source: |+
+    logging.logToOutput("=== CA: Relevant Cookies ===");
     var original = requestResponse.request();
     // Optional regex for known volatile fields; empty means exact comparison.
     String volatilePattern = "";
@@ -23,41 +24,95 @@ source: |+
             logging.logToOutput("Inconclusive: baseline is unstable. Configure volatilePattern for known dynamic fields.");
             return;
         }
-        var current = original;
-
         var cookies = new java.util.ArrayList<String>();
-        for (var header : current.headers()) {
+        var cookieHeaders = new java.util.ArrayList<burp.api.montoya.http.message.HttpHeader>();
+        var names = new java.util.LinkedHashSet<String>();
+        for (var header : original.headers()) {
             if (header.name().equalsIgnoreCase("Cookie")) {
+                cookieHeaders.add(header);
                 for (String cookie : header.value().split(";")) {
-                    if (!cookie.trim().isEmpty()) cookies.add(cookie.trim());
+                    if (!cookie.trim().isEmpty()) {
+                        cookies.add(cookie.trim());
+                        names.add(cookie.trim().split("=", 2)[0]);
+                    }
                 }
             }
         }
-        for (int i = 0; i < cookies.size();) {
+        if (cookies.isEmpty()) { logging.logToOutput("No cookies to analyze."); return; }
+        // Rebuild from the same cookie-free original, preserving the original binary body.
+        // Remove every Cookie header instance, including mixed-case and duplicate headers.
+        var withoutCookies = original.withRemovedHeaders(cookieHeaders);
+        java.util.function.Function<java.util.List<String>, burp.api.montoya.http.message.requests.HttpRequest> build = values -> {
+            if (values.isEmpty()) return withoutCookies;
+            return withoutCookies.withAddedHeader(burp.api.montoya.http.message.HttpHeader.httpHeader("Cookie", String.join("; ", values)));
+        };
+        // Confirm that consolidating Cookie headers preserves the baseline before reducing.
+        var current = build.apply(cookies);
+        if (!equivalent.test(api.http().sendRequest(current).response())) {
+            logging.logToOutput("Inconclusive: consolidating Cookie headers changed the response. No request exported."); return;
+        }
+        int deleted = 0;
+        int replaceable = 0;
+        int valueSensitive = 0;
+        int inconclusive = 0;
+        for (String name : names) {
+            // Duplicate cookie names are tested as one group to avoid redundant copies masking a requirement.
             var remaining = new java.util.ArrayList<String>(cookies);
-            var removed = remaining.remove(i);
+            remaining.removeIf(cookie -> cookie.split("=", 2)[0].equals(name));
             try {
-                var candidate = current.withRemovedHeader("Cookie");
-                if (!remaining.isEmpty()) candidate = candidate.withAddedHeader(HttpHeader.httpHeader("Cookie", String.join("; ", remaining)));
-                if (equivalent.test(api.http().sendRequest(candidate).response())) {
+                var candidate = build.apply(remaining);
+                var deletionResponse = api.http().sendRequest(candidate).response();
+                if (deletionResponse == null) {
+                    inconclusive++;
+                    logging.logToOutput("[" + name + "] Inconclusive: no response without cookie; original value retained."); continue;
+                }
+                if (equivalent.test(deletionResponse)) {
                     current = candidate;
                     cookies = remaining;
-                    logging.logToOutput("Removed cookie: " + removed.split("=", 2)[0]);
+                    deleted++;
+                    logging.logToOutput("[" + name + "] Not required in this reduction: removed.");
                     continue;
                 }
-                logging.logToOutput("Kept cookie: " + removed.split("=", 2)[0]);
+                var modified = new java.util.ArrayList<String>(cookies);
+                // Use 'b' when all original occurrences already equal 'a', so the value actually changes.
+                boolean alreadyA = true;
+                for (String cookie : cookies) {
+                    var parts = cookie.split("=", 2);
+                    if (parts[0].equals(name) && (parts.length != 2 || !parts[1].equals("a"))) alreadyA = false;
+                }
+                String testValue = alreadyA ? "b" : "a";
+                for (int i = 0; i < modified.size(); i++) {
+                    if (modified.get(i).split("=", 2)[0].equals(name)) modified.set(i, name + "=" + testValue);
+                }
+                candidate = build.apply(modified);
+                var modifiedResponse = api.http().sendRequest(candidate).response();
+                if (modifiedResponse == null) {
+                    inconclusive++;
+                    logging.logToOutput("[" + name + "] Presence required; value test inconclusive (no response). Original retained.");
+                } else if (equivalent.test(modifiedResponse)) {
+                    current = candidate;
+                    cookies = modified;
+                    replaceable++;
+                    logging.logToOutput("[" + name + "] Presence required; replacement value '" + testValue + "' accepted and retained.");
+                } else {
+                    valueSensitive++;
+                    logging.logToOutput("[" + name + "] Presence required; replacement value '" + testValue + "' changes the response. Original retained (value-sensitive).");
+                }
             } catch (Exception e) {
-                logging.logToOutput("Inconclusive; kept cookie: " + removed.split("=", 2)[0]);
+                inconclusive++;
+                logging.logToOutput("[" + name + "] Inconclusive: probe error (" + e.getClass().getSimpleName() + "); previous value retained.");
             }
-            i++;
         }
         if (!equivalent.test(api.http().sendRequest(current).response())
             || !equivalent.test(api.http().sendRequest(original).response())) {
             logging.logToOutput("Inconclusive: final validation failed. No reduced request exported.");
             return;
         }
-        api.repeater().sendToRepeater(current);
-        logging.logToOutput("Validated reduced request sent to Repeater (greedy reduction; global minimum not guaranteed).");
+        api.repeater().sendToRepeater(current, "Relevant Cookies - reduced");
+        logging.logToOutput("Removed=" + deleted + " | replacement accepted=" + replaceable
+            + " | value-sensitive=" + valueSensitive + " | inconclusive=" + inconclusive);
+        logging.logToOutput("Validated reduced request sent to a new Repeater tab, including accepted replacement values. Greedy reduction; global minimum not guaranteed.");
+        logging.logToOutput("Accepting one replacement does not prove all values are accepted; rejecting it does not prove secure validation. Disable session rules that restore cookies before testing.");
     } catch (Exception e) {
-        logging.logToOutput("Inconclusive: " + e.getMessage());
+        logging.logToOutput("Inconclusive: " + e.getClass().getSimpleName());
     }

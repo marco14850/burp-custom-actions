@@ -2,19 +2,32 @@ name: OPTIONS TRACE HEAD CONNECT
 function: CUSTOM_ACTION
 location: REPEATER
 source: |+
-	logging.logToOutput("=== CA: OPTIONS TRACE HEAD CONNECT  ===");
-
-	String[] methods = new String[] { "OPTIONS", "TRACE", "HEAD","CONNECT" };
-	for (String method : methods) {
-		var req = requestResponse.request().withMethod(method).withBody("");
-		var response = api.http().sendRequest(req).response();
-		var status = response.statusCode();
-		var body = response.bodyToString();
-		var preview = body.length() > 50 ? body.substring(0, 50) : body;
-		var allow = response.headerValue("Allow");
-		if (allow == null) allow = "No 'Allow' header";
-		logging.logToOutput("["+method+"]");
-		logging.logToOutput("["+method+"] Status: " + status);
-		logging.logToOutput("["+method+"] Allow: " + allow);
-		logging.logToOutput("["+method+"] Body: " + preview);
-	}
+    logging.logToOutput("=== CA: OPTIONS TRACE HEAD CONNECT ===");
+    var original = requestResponse.request();
+    var service = original.httpService();
+    if (service == null) { logging.logToOutput("Inconclusive: HTTP service unavailable."); return; }
+    var httpMethods = new String[] {"OPTIONS", "TRACE", "HEAD", "CONNECT"};
+    for (String method : httpMethods) {
+        try {
+            var req = original.withMethod(method).withBody("");
+            if (method.equals("CONNECT")) {
+                String host = service.host();
+                if (host.contains(":") && !host.startsWith("[")) host = "[" + host + "]";
+                String authority = host + ":" + service.port();
+                // CONNECT uses authority-form, not the original resource path. Force HTTP/1.
+                req = burp.api.montoya.http.message.requests.HttpRequest.httpRequest(service,
+                    "CONNECT " + authority + " HTTP/1.1\r\nHost: " + authority + "\r\n\r\n");
+            }
+            var response = (method.equals("CONNECT")
+                ? api.http().sendRequest(req, burp.api.montoya.http.HttpMode.HTTP_1)
+                : api.http().sendRequest(req)).response();
+            if (response == null) { logging.logToOutput("[" + method + "] Inconclusive: no response."); continue; }
+            var body = response.bodyToString();
+            var allow = response.headerValue("Allow");
+            logging.logToOutput("[" + method + "] Status: " + response.statusCode());
+            logging.logToOutput("[" + method + "] Allow: " + (allow == null ? "No 'Allow' header" : allow));
+            logging.logToOutput("[" + method + "] Body: " + (body.length() > 50 ? body.substring(0, 50) : body));
+        } catch (Exception e) {
+            logging.logToOutput("[" + method + "] Inconclusive: transport error (" + e.getClass().getSimpleName() + ").");
+        }
+    }

@@ -3,11 +3,26 @@ function: CUSTOM_ACTION
 location: REPEATER
 source: |+
     logging.logToOutput("=== CA: Delete Auth ===");
-
     var req = requestResponse.request();
-    var newReq = req.withRemovedHeader("Authorization").withRemovedHeader("Cookie");
-    var response = api().http().sendRequest(newReq).response();
-    var bodyText = response.bodyToString();
-    var preview = bodyText.length() > 50 ? bodyText.substring(0, 50) : bodyText;
-    logging().logToOutput("HTTPStatus: " + response.statusCode());
-    logging().logToOutput("Body: " + preview + " ....");
+    // Keep headers needed for routing, body framing and body interpretation.
+    // Add application-specific essential names here in lowercase, never credential headers.
+    var essentialHeaders = java.util.Set.of(
+        "host", "content-type", "content-length", "transfer-encoding", "content-encoding",
+        "connection", "te", "trailer", "expect",
+        ":method", ":scheme", ":authority", ":path"
+    );
+    var removed = new java.util.ArrayList<burp.api.montoya.http.message.HttpHeader>();
+    for (var header : req.headers()) {
+        if (!essentialHeaders.contains(header.name().toLowerCase(java.util.Locale.ROOT))) removed.add(header);
+    }
+    // Preserve the HTTP service, method, path/query and original binary body.
+    var newReq = req.withRemovedHeaders(removed);
+    try {
+        var response = api.http().sendRequest(newReq).response();
+        if (response == null) { logging.logToOutput("Inconclusive: no response received."); return; }
+        var body = response.bodyToString();
+        logging.logToOutput("HTTP Status: " + response.statusCode());
+        logging.logToOutput("Body: " + (body.length() > 50 ? body.substring(0, 50) : body));
+    } catch (Exception e) {
+        logging.logToOutput("Inconclusive: transport error (" + e.getClass().getSimpleName() + ").");
+    }

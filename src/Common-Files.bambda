@@ -6,33 +6,56 @@ source: |+
 
     String[] urls = new String[] { "robots.txt", "sitemap.xml", "humans.txt", "security.txt", "ads.txt", "crossdomain.xml", "browserconfig.xml", "manifest.json", "favicon.ico", "config.php", "phpinfo.php", "swagger","swagger-ui/index.html","swagger.json","swagger.yaml","docs","redoc","openapi.json", "server-status", "server-info", ".env", "package.json", "composer.json", "wp-login.php",".well-known/openid-configuration",".well-known/security.txt",".well-known/jwks.json","jwks.json","health","backup.zip","bck.zip",".git/config"};
     var baseRequest = requestResponse.request();
+    // Resolve files relative to the current directory, excluding the original query.
+    String currentPath = baseRequest.path();
+    int queryIndex = currentPath.indexOf('?');
+    if (queryIndex >= 0) currentPath = currentPath.substring(0, queryIndex);
+    if (!currentPath.startsWith("/")) {
+        logging.logToOutput("Use a request with a resource path beginning with '/'."); return;
+    }
+    String directory = currentPath.substring(0, currentPath.lastIndexOf('/') + 1);
+    logging.logToOutput("Scanning directory: " + directory);
     var foundUrls = new java.util.ArrayList<String>();
+    HttpResponse missing;
+    try {
+        missing = api.http().sendRequest(baseRequest.withMethod("GET")
+            .withPath(directory + "missing-" + java.util.UUID.randomUUID()).withBody("")).response();
+        if (missing == null) { logging.logToOutput("Inconclusive: missing-path control unavailable."); return; }
+    } catch (Exception e) {
+        logging.logToOutput("Inconclusive."); return;
+    }
+    logging.logToOutput("Results are unconfirmed candidates. Wildcard pages with dynamic content require manual review.");
 
     for (String path : urls) {
         try {
             var newRequest = baseRequest
                 .withMethod("GET")
-                .withPath("/"+path)
+                .withPath(directory + path)
                 .withBody("");
 
             var response = api.http().sendRequest(newRequest).response();
+            if (response == null) { logging.logToOutput(path + ": inconclusive, no response."); continue; }
 
             var status = response.statusCode();
             var body = response.bodyToString();
             var preview = body.length() > 50 ? body.substring(0, 50) : body;
 
-            if (status == 200) {
+            boolean matchesMissing = status == missing.statusCode()
+                && java.util.Objects.equals(response.headerValue("Content-Type"), missing.headerValue("Content-Type"))
+                && java.util.Arrays.equals(response.body().getBytes(), missing.body().getBytes());
+            if (status == 200 && !matchesMissing) {
                 foundUrls.add(newRequest.url());
             }
+            if (matchesMissing) logging.logToOutput("Matches missing-path control; excluded: " + path);
             
-            logging.logToOutput("URL: " + path);
+            logging.logToOutput("URL: " + newRequest.url());
             logging.logToOutput("Status: " + status);
             logging.logToOutput("Body: " + preview);
         } catch (Exception e) {
             logging.logToOutput("Error processing " + path + ": " + e.getMessage());
         }
     }
-    logging.logToOutput("---URLs found---");
+    logging.logToOutput("---Unconfirmed candidate URLs---");
     for (String url : foundUrls) {
         logging.logToOutput(url);
     }

@@ -2,6 +2,8 @@ name: Selected String Analyzer
 function: CUSTOM_ACTION
 location: REPEATER
 source: |+
+    logging.logToOutput("=== CA: Selected String Analyzer ===");
+    if (!selection.hasResponseSelection()) { logging().logToOutput("Select text in the response first."); return; }
     var text = selection.responseSelection().contents().toString().strip();
     if (text.isEmpty()) { logging().logToOutput("Select text in the response first."); return; }
     boolean found = false;

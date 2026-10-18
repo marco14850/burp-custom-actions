@@ -2,7 +2,8 @@ name: Request Smuggling Tester
 function: CUSTOM_ACTION
 location: REPEATER
 source: |+
-    logging().logToOutput("Request smuggling probes: observations only; manual confirmation required.");
+    logging.logToOutput("=== CA: Request Smuggling Tester ===");
+    logging().logToOutput("Request smuggling context: manual confirmation required.");
     var original = requestResponse.request();
     var host = original.headerValue("Host");
     if (host == null || host.isBlank()) {
@@ -34,4 +35,4 @@ source: |+
                 + ((System.nanoTime() - started) / 1_000_000) + " ms: " + e.getMessage() + "; inconclusive.");
         }
     }
-    logging().logToOutput("Finished. Status differences and delays alone do not confirm or exclude request smuggling. Inspect Logger and validate in an isolated test environment.");
+    logging().logToOutput("Finished - Inspect Logger.");
